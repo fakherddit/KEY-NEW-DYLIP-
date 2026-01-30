@@ -108,11 +108,13 @@ Validates a key and registers device.
 }
 ```
 
+**Note:** `udid` stands for Unique Device ID (also referred to as HWID - Hardware ID in the bot interface).
+
 **Response (Success):**
 ```json
 {
   "status": "success",
-  "expiry": "2026-02-30",
+  "expiry": "2026-02-28",
   "message": "Welcome Back"
 }
 ```
@@ -141,7 +143,7 @@ Keys are stored in `keys.json` with the following structure:
 ```json
 {
   "STONEIOS-ABC123XYZ0": {
-    "expiry": "2026-02-30",
+    "expiry": "2026-02-28",
     "max_devices": 1,
     "used_hwids": ["device1_hwid"],
     "status": "active",
