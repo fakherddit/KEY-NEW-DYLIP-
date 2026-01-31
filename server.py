@@ -1,386 +1,234 @@
-from flask import Flask, request, jsonify
-import telebot
-from telebot import types
-import json
-import os
-import random
-import string
-import datetime
-from threading import Thread
+<?php
+// telegram_bot_enhanced.php - Full Featured Bot with Server Controls
+// Rename this to telegram_bot.php after reviewing
 
-# --- CONFIGURATION ---
-# 1. Get your Bot Token from BotFather
-# 2. Add it to Render Environment Variables as 'BOT_TOKEN'
-#    OR replace it directly here (Not recommended for public repos)
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
-ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
+$telegram_token = "8216359066:AAEt2GFGgTBp3hh_znnJagH3h1nN5A_XQf0";
+$admin_chat_id = 7210704553;
 
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN env var is required")
+$update = json_decode(file_get_contents('php://input'), true);
+if (!$update) exit();
 
-# Initialize Apps
-app = Flask(__name__)
-bot = telebot.TeleBot(BOT_TOKEN)
+$message = $update['message'] ?? null;
+$callback_query = $update['callback_query'] ?? null;
 
-# --- SECURITY MIDDLEWARE ---
-def _is_admin(user_id: int) -> bool:
-    return ADMIN_ID == 0 or user_id == ADMIN_ID
-
-@bot.message_handler(func=lambda message: not _is_admin(message.from_user.id))
-def unauthorized_user(message):
-    bot.reply_to(message, "⛔ **Access Denied**\n\nYou are not authorized to use this bot.", parse_mode="Markdown")
-
-@bot.callback_query_handler(func=lambda call: not _is_admin(call.from_user.id))
-def unauthorized_callback(call):
-    bot.answer_callback_query(call.id, "⛔ Access Denied")
-
-# Storage (Note: On Render Free, this resets on restart! Use a DB for permanent storage)
-KEYS_FILE = 'keys.json'
-keys_db = {}
-
-def load_keys():
-    global keys_db
-    try:
-        if os.path.exists(KEYS_FILE):
-            with open(KEYS_FILE, 'r') as f:
-                keys_db = json.load(f)
-    except:
-        keys_db = {}
-
-def save_keys():
-    try:
-        with open(KEYS_FILE, 'w') as f:
-            json.dump(keys_db, f)
-    except:
-        pass
-
-load_keys()
-
-# --- UTILS ---
-def generate_random_key(length=10):
-    chars = string.ascii_uppercase + string.digits
-    return 'STONEIOS-' + ''.join(random.choice(chars) for _ in range(length))
-
-def get_expiry_date(days):
-    if days >= 3000:
-        return "Lifetime"
-    exp = datetime.datetime.now() + datetime.timedelta(days=days)
-    return exp.strftime("%Y-%m-%d")
-
-# --- BOT INTERFACE ---
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    btn_1day = types.KeyboardButton('🔑 Gen 1 Day (1 Device)')
-    btn_1week = types.KeyboardButton('🔑 Gen 7 Days (1 Device)')
-    btn_1month = types.KeyboardButton('🔑 Gen 30 Days (1 Device)')
-    btn_global = types.KeyboardButton('🌍 Gen Global Key (Unlimited Devices)')
-    btn_list = types.KeyboardButton('📋 List Keys')
-    btn_custom = types.KeyboardButton('🛠 Custom Gen')
-
-    # Management
-    btn_ban = types.KeyboardButton('🚫 Ban Key')
-    btn_reset = types.KeyboardButton('🔄 Reset HWID')
-    btn_pause = types.KeyboardButton('⏸ Pause Key')
-    btn_info = types.KeyboardButton('🔍 Check Key Stats')
-    btn_buy = types.KeyboardButton('🛒 Buy Key')
-
-    markup.add(btn_1day, btn_1week, btn_1month, btn_global, btn_list, btn_custom)
-    markup.add(btn_ban, btn_reset, btn_pause, btn_info, btn_buy)
+// Handle callbacks
+if ($callback_query) {
+    $chat_id = $callback_query['message']['chat']['id'];
+    $data = $callback_query['data'];
     
-    bot.reply_to(message, "👋 Welcome to StoneiOS Cheats Manager!\nSelect an option below:", reply_markup=markup)
-
-@bot.message_handler(func=lambda message: message.text.startswith('🔑 Gen'))
-def quick_gen(message):
-    days = 1
-    if "7 Days" in message.text: days = 7
-    if "30 Days" in message.text: days = 30
-    
-    create_key(message, days, 1)
-
-@bot.message_handler(func=lambda message: message.text == '🌍 Gen Global Key (Unlimited Devices)')
-def global_gen_menu(message):
-    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
-    btn_g_1day = types.KeyboardButton('🌍 Global 1 Day')
-    btn_g_7days = types.KeyboardButton('🌍 Global 7 Days')
-    btn_g_30days = types.KeyboardButton('🌍 Global 30 Days')
-    btn_back = types.KeyboardButton('🔙 Back')
-    markup.add(btn_g_1day, btn_g_7days, btn_g_30days, btn_back)
-    
-    bot.reply_to(message, "🌍 **Global Key Duration:**\nSelect how long this key should last:", reply_markup=markup, parse_mode="Markdown")
-
-@bot.message_handler(func=lambda message: message.text.startswith('🌍 Global'))
-def global_gen_action(message):
-    days = 1
-    if "7 Days" in message.text: days = 7
-    if "30 Days" in message.text: days = 30
-    
-    create_key(message, days, 999999)
-
-@bot.message_handler(func=lambda message: message.text == '🔙 Back')
-def back_to_main(message):
-    send_welcome(message)
-
-@bot.message_handler(func=lambda message: message.text == '📋 List Keys')
-def list_keys_ui(message):
-    if not keys_db:
-        bot.reply_to(message, "📂 No active keys.")
-        return
-    
-    msg = "📂 **Active Keys:**\n\n"
-    for k, v in keys_db.items():
-        status = "✅ Active" if v.get('status', 'active') == 'active' else "❌ Banned"
-        users = len(v.get('used_hwids', []))
-        max_users = v.get('max_devices', 1)
-        max_str = "∞" if max_users > 900000 else str(max_users)
-        
-        msg += f"🔑 `{k}`\n⏳ {v['expiry']} | 👥 {users}/{max_str} | {status}\n/reset_{k} | /ban_{k} | /del_{k}\n\n"
-    
-    # Split message if too long
-    if len(msg) > 4000:
-        bot.reply_to(message, msg[:4000] + "...", parse_mode="Markdown")
-    else:
-        bot.reply_to(message, msg, parse_mode="Markdown")
-
-@bot.message_handler(regexp=r"^/reset_")
-def reset_key(message):
-    key = message.text.replace("/reset_", "")
-    if key in keys_db:
-        keys_db[key]['used_hwids'] = []
-        save_keys()
-        bot.reply_to(message, f"🔄 Key `{key}` devices have been RESET.\nIt can now be used on a new device.", parse_mode="Markdown")
-    else:
-        bot.reply_to(message, "Key not found.")
-
-@bot.message_handler(func=lambda message: message.text == '🛠 Custom Gen')
-def custom_gen_info(message):
-    bot.reply_to(message, "To generate custom keys, use command:\n\n`/gen [days] [max_devices]`\n\nExample:\n`/gen 3 2` (3 Days, 2 Devices)\n`/gen 30 100` (30 Days, 100 Devices)", parse_mode="Markdown")
-
-# --- MANAGEMENT HANDLERS ---
-@bot.message_handler(func=lambda message: message.text == '🚫 Ban Key')
-def ask_ban_key(message):
-    msg = bot.reply_to(message, "🚫 **Ban Key Mode**\n\nPlease send the Key you want to BAN:", parse_mode="Markdown")
-    bot.register_next_step_handler(msg, process_ban_key)
-
-def process_ban_key(message):
-    if message.text == '🔙 Back' or message.text.startswith('/'):
-        return # Avoid processing commands as keys
-        
-    key = message.text.strip()
-    if key in keys_db:
-        keys_db[key]['status'] = 'banned'
-        save_keys()
-        bot.reply_to(message, f"✅ Key `{key}` is now **BANNED**.", parse_mode="Markdown")
-    else:
-        bot.reply_to(message, "❌ Key not found in database.")
-
-@bot.message_handler(func=lambda message: message.text == '🔄 Reset HWID')
-def ask_reset_key(message):
-    msg = bot.reply_to(message, "🔄 **Reset Device Mode**\n\nPlease send the Key to RESET devices for:", parse_mode="Markdown")
-    bot.register_next_step_handler(msg, process_reset_key)
-
-def process_reset_key(message):
-    if message.text == '🔙 Back' or message.text.startswith('/'):
-        return 
-        
-    key = message.text.strip()
-    if key in keys_db:
-            keys_db[key]['used_hwids'] = []
-            save_keys()
-            bot.reply_to(message, f"✅ Devices for `{key}` have been **RESET**.", parse_mode="Markdown")
-    else:
-        bot.reply_to(message, "❌ Key not found.")
-
-@bot.message_handler(func=lambda message: message.text == '⏸ Pause Key')
-def ask_pause_key(message):
-    msg = bot.reply_to(message, "⏸ **Pause Key Mode**\n\nPlease send the Key you want to PAUSE:", parse_mode="Markdown")
-    bot.register_next_step_handler(msg, process_pause_key)
-    
-def process_pause_key(message):
-    if message.text == '🔙 Back' or message.text.startswith('/'):
-        return
-        
-    key = message.text.strip()
-    if key in keys_db:
-        keys_db[key]['status'] = 'paused'
-        save_keys()
-        bot.reply_to(message, f"✅ Key `{key}` is now **PAUSED**.", parse_mode="Markdown")
-    else:
-        bot.reply_to(message, "❌ Key not found.")
-
-@bot.message_handler(func=lambda message: message.text == '🔍 Check Key Stats')
-def ask_key_info(message):
-    msg = bot.reply_to(message, "🔍 **Check Key Stats**\n\nSend the Key to see how many users are using it:", parse_mode="Markdown")
-    bot.register_next_step_handler(msg, process_key_info)
-
-def process_key_info(message):
-    if message.text == '🔙 Back' or message.text.startswith('/'):
-        return
-        
-    key = message.text.strip()
-    if key in keys_db:
-        v = keys_db[key]
-        users_count = len(v.get('used_hwids', []))
-        max_dev = v.get('max_devices', 1)
-        
-        msg = f"📊 **Key Statistics**\n\n"
-        msg += f"🔑 `{key}`\n"
-        msg += f"👥 **Online Users:** {users_count}\n"
-        msg += f"📱 **Max Devices:** {'Unlimited' if max_dev > 900000 else max_dev}\n"
-        msg += f"📅 **Expiry:** {v['expiry']}\n"
-        msg += f"🔋 **Status:** {v.get('status', 'active').upper()}"
-        
-        bot.reply_to(message, msg, parse_mode="Markdown")
-    else:
-        bot.reply_to(message, "❌ Key not found.")
-
-@bot.message_handler(func=lambda message: message.text == '🛒 Buy Key')
-def buy_key_link(message):
-    markup = types.InlineKeyboardMarkup()
-    btn = types.InlineKeyboardButton("🛒 Buy Now", url="https://t.me/FAKHERDDIN5")
-    markup.add(btn)
-    bot.reply_to(message, "Click below to contact support and buy keys:", reply_markup=markup)
-
-@bot.message_handler(commands=['gen'])
-def command_gen(message):
-    try:
-        parts = message.text.split()
-        days = int(parts[1]) if len(parts) > 1 else 1
-        max_dev = int(parts[2]) if len(parts) > 2 else 1
-        create_key(message, days, max_dev)
-    except:
-        bot.reply_to(message, "Usage: `/gen [days] [max_devices]`")
-
-def create_key(message, days, max_devices):
-    key = generate_random_key()
-    expiry = get_expiry_date(days)
-    
-    keys_db[key] = {
-        "expiry": expiry,
-        "max_devices": max_devices,
-        "used_hwids": [],
-        "status": "active",
-        "created_at": str(datetime.datetime.now())
+    if (strpos($data, 'gen_') === 0) {
+        list($action, $count, $days) = explode('_', $data);
+        generateKeys($chat_id, $count, $days, 'standard', $telegram_token, $pdo);
+    } elseif (strpos($data, 'global_') === 0) {
+        list($action, $type) = explode('_', $data);
+        generateGlobalKey($chat_id, $type, $telegram_token, $pdo);
+    } elseif ($data === 'server_toggle') {
+        toggleServer($chat_id, $telegram_token, $pdo);
+    } elseif ($data === 'validation_toggle') {
+        toggleValidation($chat_id, $telegram_token, $pdo);
+    } elseif ($data === 'creation_toggle') {
+        toggleCreation($chat_id, $telegram_token, $pdo);
+    } elseif ($data === 'delete_expired') {
+        deleteExpiredKeys($chat_id, $telegram_token, $pdo);
     }
-    save_keys()
     
-    type_str = "Single User"
-    if max_devices > 1: type_str = f"Multi-User ({max_devices})"
-    if max_devices > 900000: type_str = "GLOBAL (Unlimited)"
+    answerCallbackQuery($callback_query['id'], $telegram_token);
+    exit();
+}
+
+// Handle messages
+if ($message) {
+    $chat_id = $message['chat']['id'];
+    $text = $message['text'] ?? '';
+    $user_id = $message['from']['id'];
     
-    bot.reply_to(message, f"✅ **Key Generated!**\n\n🔑 Key: `{key}`\n⏳ Expires: {expiry}\n👥 Type: {type_str}\n\nCopy and send to user.", parse_mode="Markdown")
-
-@bot.message_handler(regexp=r"^/ban_")
-def ban_key(message):
-    key = message.text.replace("/ban_", "")
-    if key in keys_db:
-        keys_db[key]['status'] = 'banned'
-        save_keys()
-        bot.reply_to(message, f"🚫 Key `{key}` has been BANNED.", parse_mode="Markdown")
-    else:
-        bot.reply_to(message, "Key not found.")
-
-@bot.message_handler(regexp=r"^/del_")
-def del_key(message):
-    key = message.text.replace("/del_", "")
-    if key in keys_db:
-        del keys_db[key]
-        save_keys()
-        bot.reply_to(message, f"🗑 Key `{key}` DELETED.", parse_mode="Markdown")
-    else:
-        bot.reply_to(message, "Key not found.")
-
-@bot.message_handler(func=lambda message: message.text and message.text.strip() in keys_db)
-def auto_ban_pasted_key(message):
-    key = message.text.strip()
-    if keys_db[key].get('status') == 'banned':
-        # If already banned, offer to unban
-        markup = types.InlineKeyboardMarkup()
-        btn = types.InlineKeyboardButton("♻️ Unban Key", callback_data=f"unban_{key}")
-        markup.add(btn)
-        bot.reply_to(message, f"ℹ️ Key `{key}` is already **BANNED**.", reply_markup=markup, parse_mode="Markdown")
-        return
-
-    keys_db[key]['status'] = 'banned'
-    save_keys()
+    if ($user_id != $admin_chat_id) {
+        sendMessage($chat_id, "⛔ Unauthorized", $telegram_token);
+        exit();
+    }
     
-    # Offer Unban option just in case
-    markup = types.InlineKeyboardMarkup()
-    btn = types.InlineKeyboardButton("♻️ Mistake? Unban", callback_data=f"unban_{key}")
-    markup.add(btn)
+    switch ($text) {
+        case '/start': sendMainMenu($chat_id, $telegram_token); break;
+        case '/generate': sendGenerateMenu($chat_id, $telegram_token); break;
+        case '/global': sendGlobalKeyMenu($chat_id, $telegram_token); break;
+        case '/control': sendControlMenu($chat_id, $telegram_token, $pdo); break;
+        case '/stats': sendStats($chat_id, $telegram_token, $pdo); break;
+        case '/list': listActiveKeys($chat_id, $telegram_token, $pdo); break;
+        default:
+            if (preg_match('/^[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$/i', $text)) {
+                lookupKey($chat_id, $text, $telegram_token, $pdo);
+            }
+    }
+}
+
+function sendMessage($chat_id, $text, $token, $reply_markup = null) {
+    $url = "https://api.telegram.org/bot{$token}/sendMessage";
+    $data = ['chat_id' => $chat_id, 'text' => $text, 'parse_mode' => 'HTML'];
+    if ($reply_markup) $data['reply_markup'] = json_encode($reply_markup);
     
-    bot.reply_to(message, f"🚫 **Key Automatically BANNED!**\n`{key}`\n\nUsers can no longer log in.", reply_markup=markup, parse_mode="Markdown")
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
+    curl_exec($ch);
+    curl_close($ch);
+}
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('unban_'))
-def callback_unban(call):
-    key = call.data.replace("unban_", "")
-    if key in keys_db:
-        keys_db[key]['status'] = 'active'
-        save_keys()
-        bot.edit_message_text(f"✅ **Key Unbanned!**\n`{key}` is now Active.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
-        bot.answer_callback_query(call.id, "Key Unbanned")
-    else:
-        bot.answer_callback_query(call.id, "Key not found")
+function sendMainMenu($chat_id, $token) {
+    $text = "🎮 <b>ST FAMILY License Bot</b>\n\n";
+    $text .= "/generate - Standard keys\n";
+    $text .= "/global - Global keys (unlimited users)\n";
+    $text .= "/control - Server controls\n";
+    $text .= "/stats - Statistics\n";
+    $text .= "/list - List keys";
+    sendMessage($chat_id, $text, $token);
+}
 
+function sendGenerateMenu($chat_id, $token) {
+    $keyboard = ['inline_keyboard' => [
+        [['text' => '1 Key - 7 Days', 'callback_data' => 'gen_1_7'], ['text' => '1 Key - 30 Days', 'callback_data' => 'gen_1_30']],
+        [['text' => '5 Keys - 30 Days', 'callback_data' => 'gen_5_30'], ['text' => '10 Keys - 30 Days', 'callback_data' => 'gen_10_30']],
+        [['text' => '1 Key - Lifetime', 'callback_data' => 'gen_1_3650'], ['text' => '5 Keys - Lifetime', 'callback_data' => 'gen_5_3650']]
+    ]];
+    sendMessage($chat_id, "🔑 Generate Standard Keys", $token, $keyboard);
+}
 
-# --- API Logic ---
-@app.route('/check', methods=['POST'])
-def check_key():
-    key = request.form.get('key')
-    udid = request.form.get('udid')
+function sendGlobalKeyMenu($chat_id, $token) {
+    $keyboard = ['inline_keyboard' => [
+        [['text' => '🌍 Global Day', 'callback_data' => 'global_day']],
+        [['text' => '🌍 Global Week', 'callback_data' => 'global_week']],
+        [['text' => '🌍 Global Month', 'callback_data' => 'global_month']]
+    ]];
+    sendMessage($chat_id, "🌐 Global Keys (Unlimited Users)", $token, $keyboard);
+}
+
+function sendControlMenu($chat_id, $token, $pdo) {
+    $server = getStatus($pdo, 'server_enabled');
+    $validation = getStatus($pdo, 'key_validation_enabled');
+    $creation = getStatus($pdo, 'key_creation_enabled');
     
-    if not key or not udid:
-        return jsonify({"status": "failed", "message": "Missing Data"})
+    $text = "⚙️ <b>Control Panel</b>\n\n";
+    $text .= ($server ? '🟢' : '🔴') . " Server\n";
+    $text .= ($validation ? '🟢' : '🔴') . " Validation\n";
+    $text .= ($creation ? '🟢' : '🔴') . " Creation";
     
-    if key in keys_db:
-        data = keys_db[key]
-        
-        # 1. Check Status
-        status = data.get('status', 'active')
-        if status == 'banned':
-            return jsonify({"status": "failed", "message": "Key is BANNED"})
-        if status == 'paused':
-            return jsonify({"status": "failed", "message": "Key is PAUSED"})
-            
-        # 2. Check Expiry (Simple String Compare for now, can be improved)
-        today = datetime.datetime.now().strftime("%Y-%m-%d")
-        if data['expiry'] != "Lifetime" and today > data['expiry']:
-             return jsonify({"status": "failed", "message": "Key EXPIRED"})
-
-        # 3. Check Device Lock
-        used_list = data.get('used_hwids', [])
-        max_dev = data.get('max_devices', 1)
-        
-        if udid in used_list:
-            # Already authorized on this device
-            return jsonify({"status": "success", "expiry": data['expiry'], "message": "Welcome Back"})
-            
-        # Not in list, check if room available
-        if len(used_list) < max_dev:
-            # Add device
-            used_list.append(udid)
-            keys_db[key]['used_hwids'] = used_list
-            save_keys()
-            return jsonify({"status": "success", "expiry": data['expiry'], "message": "Device Registered"})
-        else:
-            return jsonify({"status": "failed", "message": f"Max Devices Reached ({max_dev})"})
-            
-    return jsonify({"status": "failed", "message": "Invalid Key"})
-
-@app.route('/')
-def home():
-    return "StoneiOS Cheats Server is Running!"
-
-# --- RUNNER ---
-def run_flask():
-    # Helper to clean port execution
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
-
-if __name__ == '__main__':
-    # Start Flask in separate thread so Bot works too
-    t = Thread(target=run_flask)
-    t.start()
+    $keyboard = ['inline_keyboard' => [
+        [['text' => ($server ? '🔴 Stop Server' : '🟢 Start Server'), 'callback_data' => 'server_toggle']],
+        [['text' => ($validation ? '🔴 Disable Validation' : '🟢 Enable Validation'), 'callback_data' => 'validation_toggle']],
+        [['text' => ($creation ? '🔴 Disable Creation' : '🟢 Enable Creation'), 'callback_data' => 'creation_toggle']],
+        [['text' => '🗑️ Delete Expired', 'callback_data' => 'delete_expired']]
+    ]];
     
-    # Start Polling
-    bot.infinity_polling()
+    sendMessage($chat_id, $text, $token, $keyboard);
+}
+
+function generateKeys($chat_id, $count, $days, $type, $token, $pdo) {
+    if (!getStatus($pdo, 'key_creation_enabled')) {
+        sendMessage($chat_id, "❌ Creation disabled", $token);
+        return;
+    }
+    
+    $keys = [];
+    for ($i = 0; $i < $count; $i++) {
+        $key = sprintf("%04X-%04X-%04X-%04X", mt_rand(0, 0xFFFF), mt_rand(0, 0xFFFF), mt_rand(0, 0xFFFF), mt_rand(0, 0xFFFF));
+        $expiry = date('Y-m-d H:i:s', strtotime("+$days days"));
+        $stmt = $pdo->prepare("INSERT INTO licenses (license_key, expiry_date, key_type) VALUES (?, ?, ?)");
+        if ($stmt->execute([$key, $expiry, $type])) $keys[] = $key;
+    }
+    
+    $duration = $days >= 3650 ? 'Lifetime' : "$days Days";
+    $text = "✅ Generated {$count} Key(s) - {$duration}\n\n<code>" . implode("\n", $keys) . "</code>";
+    sendMessage($chat_id, $text, $token);
+}
+
+function generateGlobalKey($chat_id, $type, $token, $pdo) {
+    if (!getStatus($pdo, 'key_creation_enabled')) {
+        sendMessage($chat_id, "❌ Creation disabled", $token);
+        return;
+    }
+    
+    $days = ['day' => 1, 'week' => 7, 'month' => 30][$type];
+    $key = sprintf("GLB-%04X-%04X-%04X", mt_rand(0, 0xFFFF), mt_rand(0, 0xFFFF), mt_rand(0, 0xFFFF));
+    $expiry = date('Y-m-d H:i:s', strtotime("+$days days"));
+    
+    $stmt = $pdo->prepare("INSERT INTO licenses (license_key, expiry_date, key_type) VALUES (?, ?, ?)");
+    if ($stmt->execute([$key, $expiry, "global_$type"])) {
+        $text = "🌐 Global {$type} Key\n\n<code>{$key}</code>\n\n✅ Unlimited users\n⏰ {$days} day(s)";
+        sendMessage($chat_id, $text, $token);
+    }
+}
+
+function toggleServer($chat_id, $token, $pdo) {
+    toggleStatus($pdo, 'server_enabled', $chat_id, $token, 'Server');
+}
+
+function toggleValidation($chat_id, $token, $pdo) {
+    toggleStatus($pdo, 'key_validation_enabled', $chat_id, $token, 'Validation');
+}
+
+function toggleCreation($chat_id, $token, $pdo) {
+    toggleStatus($pdo, 'key_creation_enabled', $chat_id, $token, 'Creation');
+}
+
+function toggleStatus($pdo, $key, $chat_id, $token, $name) {
+    $current = getStatus($pdo, $key);
+    $new = $current ? '0' : '1';
+    $pdo->prepare("UPDATE server_settings SET value = ? WHERE key = ?")->execute([$new, $key]);
+    sendMessage($chat_id, ($new === '1' ? '🟢' : '🔴') . " $name " . ($new === '1' ? 'enabled' : 'disabled'), $token);
+}
+
+function deleteExpiredKeys($chat_id, $token, $pdo) {
+    $stmt = $pdo->prepare("DELETE FROM licenses WHERE expiry_date < NOW()");
+    $stmt->execute();
+    sendMessage($chat_id, "🗑️ Deleted " . $stmt->rowCount() . " expired keys", $token);
+}
+
+function sendStats($chat_id, $token, $pdo) {
+    $total = $pdo->query("SELECT COUNT(*) FROM licenses")->fetchColumn();
+    $active = $pdo->query("SELECT COUNT(*) FROM licenses WHERE status = 'active' AND expiry_date > NOW()")->fetchColumn();
+    $used = $pdo->query("SELECT COUNT(*) FROM licenses WHERE hwid IS NOT NULL")->fetchColumn();
+    $global = $pdo->query("SELECT COUNT(*) FROM licenses WHERE key_type LIKE 'global_%'")->fetchColumn();
+    
+    $text = "📊 <b>Statistics</b>\n\n📦 Total: {$total}\n✅ Active: {$active}\n🔗 Used: {$used}\n🌐 Global: {$global}";
+    sendMessage($chat_id, $text, $token);
+}
+
+function listActiveKeys($chat_id, $token, $pdo) {
+    $stmt = $pdo->query("SELECT license_key, hwid, expiry_date, key_type FROM licenses WHERE status = 'active' AND expiry_date > NOW() ORDER BY created_at DESC LIMIT 20");
+    $text = "🔑 Active Keys (Last 20)\n\n";
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $is_global = strpos($row['key_type'], 'global_') === 0;
+        $status = $is_global ? '🌐 Global' : ($row['hwid'] ? '🔗 Bound' : '⚪ Available');
+        $text .= "<code>{$row['license_key']}</code> {$status}\n";
+    }
+    sendMessage($chat_id, $text, $token);
+}
+
+function lookupKey($chat_id, $key, $token, $pdo) {
+    $stmt = $pdo->prepare("SELECT * FROM licenses WHERE license_key = ?");
+    $stmt->execute([$key]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($row) {
+        $is_global = strpos($row['key_type'], 'global_') === 0;
+        $text = "🔍 Key: <code>{$key}</code>\n";
+        $text .= "Type: " . ($is_global ? "🌐 Global" : "Standard") . "\n";
+        $text .= "Status: " . ($row['status'] == 'active' ? '✅' : '❌') . " {$row['status']}\n";
+        $text .= "Expires: " . date('Y-m-d H:i', strtotime($row['expiry_date']));
+        sendMessage($chat_id, $text, $token);
+    }
+}
+
+function getStatus($pdo, $key) {
+    $stmt = $pdo->query("SELECT value FROM server_settings WHERE key = '$key'");
+    return $stmt ? $stmt->fetchColumn() === '1' : true;
+}
+
+function answerCallbackQuery($callback_id, $token) {
+    $ch = curl_init("https://api.telegram.org/bot{$token}/answerCallbackQuery");
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, ['callback_query_id' => $callback_id]);
+    curl_exec($ch);
+    curl_close($ch);
+}
+?>
